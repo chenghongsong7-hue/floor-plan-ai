@@ -1,0 +1,985 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI 輔助建築平面圖生成系統</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+  <style>
+    /* ── Reset & Base ─────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:        #FAFAF8;
+      --surface:   #F2F1EE;
+      --border:    #E0DED8;
+      --border-2:  #C8C6BF;
+      --text:      #1A1916;
+      --text-2:    #5C5B57;
+      --text-3:    #9B9A95;
+      --accent:    #1A1916;
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-lg: 14px;
+      --font:      'Noto Sans TC', 'Hiragino Sans', system-ui, sans-serif;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg:      #161614;
+        --surface: #1F1E1C;
+        --border:  #2E2D2A;
+        --border-2:#454440;
+        --text:    #F0EFE9;
+        --text-2:  #A8A7A0;
+        --text-3:  #6B6A65;
+        --accent:  #F0EFE9;
+      }
+    }
+    html, body { height: 100%; }
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      font-size: 14px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Layout ───────────────────────────────────────── */
+    #root { display: flex; flex-direction: column; min-height: 100vh; }
+    .header {
+      padding: 14px 24px;
+      border-bottom: 0.5px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--bg);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .header-title {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+    }
+    .header-title h1 {
+      font-size: 15px;
+      font-weight: 500;
+      letter-spacing: -0.01em;
+    }
+    .header-title span {
+      font-size: 11px;
+      color: var(--text-3);
+      background: var(--surface);
+      padding: 2px 8px;
+      border-radius: 10px;
+      border: 0.5px solid var(--border);
+    }
+    .header-meta {
+      font-size: 12px;
+      color: var(--text-3);
+    }
+    .app {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 300px 1fr;
+      height: calc(100vh - 49px);
+    }
+
+    /* ── Sidebar ──────────────────────────────────────── */
+    .sidebar {
+      background: var(--surface);
+      border-right: 0.5px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+    }
+    .sidebar::-webkit-scrollbar { width: 4px; }
+    .sidebar::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 4px; }
+    .sb-sec {
+      padding: 14px 16px;
+      border-bottom: 0.5px solid var(--border);
+    }
+    .sb-sec:last-child { border-bottom: none; }
+    .sec-label {
+      font-size: 10px;
+      font-weight: 500;
+      color: var(--text-3);
+      text-transform: uppercase;
+      letter-spacing: .1em;
+      margin-bottom: 10px;
+    }
+    .field { margin-bottom: 8px; }
+    .field:last-child { margin-bottom: 0; }
+    .field label {
+      display: block;
+      font-size: 12px;
+      color: var(--text-2);
+      margin-bottom: 4px;
+    }
+    .field input[type=number],
+    .field select {
+      width: 100%;
+      font-size: 13px;
+      padding: 6px 9px;
+      border: 0.5px solid var(--border-2);
+      border-radius: var(--radius-sm);
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      appearance: none;
+      -webkit-appearance: none;
+    }
+    .field input[type=number]:focus,
+    .field select:focus {
+      outline: none;
+      border-color: var(--text-2);
+    }
+    .g2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+    /* Stats */
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .stat {
+      background: var(--bg);
+      border-radius: var(--radius-sm);
+      padding: 7px 8px;
+      text-align: center;
+      border: 0.5px solid var(--border);
+    }
+    .stat-v { font-size: 14px; font-weight: 500; }
+    .stat-l { font-size: 10px; color: var(--text-3); margin-top: 2px; }
+
+    /* Progress bar */
+    .pbar {
+      height: 2px;
+      background: var(--border);
+      border-radius: 2px;
+      overflow: hidden;
+      margin-top: 6px;
+    }
+    .pfill {
+      height: 100%;
+      background: var(--text);
+      transition: width .4s ease;
+    }
+
+    /* Constraints grid */
+    .cg {
+      display: grid;
+      grid-template-columns: auto 1fr 1fr;
+      gap: 4px 7px;
+      align-items: center;
+    }
+    .cg-head { font-size: 10px; color: var(--text-3); }
+    .cg-dot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+    .cg-name { font-size: 11px; color: var(--text-2); }
+    .cg-inp {
+      font-size: 11px;
+      padding: 3px 6px;
+      border: 0.5px solid var(--border-2);
+      border-radius: 4px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      width: 100%;
+    }
+    .cg-inp:focus { outline: none; border-color: var(--text-2); }
+
+    /* Toggles */
+    .toggle {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 6px;
+      font-size: 12px;
+      color: var(--text-2);
+    }
+    .toggle:last-child { margin-bottom: 0; }
+    .toggle input[type=checkbox] {
+      width: 14px;
+      height: 14px;
+      cursor: pointer;
+      accent-color: var(--accent);
+    }
+
+    /* Buttons */
+    .btn-main {
+      width: 100%;
+      background: var(--text);
+      color: var(--bg);
+      border: none;
+      border-radius: var(--radius-sm);
+      padding: 10px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      font-family: var(--font);
+      transition: opacity .15s;
+    }
+    .btn-main:hover { opacity: .82; }
+    .btn-main:disabled { opacity: .35; cursor: not-allowed; }
+    .export-row { display: flex; gap: 5px; }
+    .btn-out {
+      flex: 1;
+      background: var(--bg);
+      color: var(--text);
+      border: 0.5px solid var(--border-2);
+      border-radius: var(--radius-sm);
+      padding: 6px 8px;
+      font-size: 11px;
+      cursor: pointer;
+      font-family: var(--font);
+      text-align: center;
+    }
+    .btn-out:hover { background: var(--surface); }
+    .btn-out:disabled { opacity: .3; cursor: not-allowed; }
+
+    /* AI Note */
+    .note {
+      font-size: 11px;
+      color: var(--text-2);
+      line-height: 1.6;
+      padding: 7px 10px;
+      background: var(--bg);
+      border-radius: var(--radius-sm);
+      border-left: 2px solid var(--border-2);
+      margin-top: 8px;
+    }
+
+    /* ── Canvas Area ──────────────────────────────────── */
+    .canvas-wrap {
+      background: var(--bg);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .topbar {
+      padding: 9px 16px;
+      border-bottom: 0.5px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      flex-wrap: wrap;
+      min-height: 44px;
+    }
+    .tab-group { display: flex; gap: 4px; }
+    .tab {
+      font-size: 12px;
+      padding: 3px 10px;
+      border-radius: 20px;
+      cursor: pointer;
+      border: 0.5px solid transparent;
+      color: var(--text-2);
+      transition: all .12s;
+    }
+    .tab.on {
+      background: var(--surface);
+      border-color: var(--border-2);
+      color: var(--text);
+      font-weight: 500;
+    }
+    .plan-tabs { display: flex; gap: 3px; }
+    .ptab {
+      font-size: 11px;
+      padding: 3px 9px;
+      border-radius: 4px;
+      cursor: pointer;
+      border: 0.5px solid var(--border);
+      color: var(--text-2);
+    }
+    .ptab.on {
+      background: var(--surface);
+      border-color: var(--border-2);
+      color: var(--text);
+      font-weight: 500;
+    }
+    .svg-area {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      overflow: auto;
+    }
+
+    /* Empty / Loading */
+    .empty-state {
+      text-align: center;
+      padding: 40px 20px;
+      color: var(--text-2);
+      line-height: 2;
+    }
+    .spinner {
+      width: 22px;
+      height: 22px;
+      border: 2px solid var(--border);
+      border-top-color: var(--text);
+      border-radius: 50%;
+      animation: spin .65s linear infinite;
+      margin: 0 auto 14px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .err {
+      margin: 14px;
+      padding: 10px 12px;
+      font-size: 12px;
+      color: #B03A2E;
+      background: #FDECEA;
+      border: 0.5px solid #F1A89F;
+      border-radius: var(--radius-sm);
+    }
+    @media (prefers-color-scheme: dark) {
+      .err { color: #F1948A; background: #2C1810; border-color: #6E3228; }
+    }
+
+    /* Compare Grid */
+    .compare-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      width: 100%;
+    }
+    .ccard {
+      border: 0.5px solid var(--border);
+      border-radius: var(--radius-md);
+      overflow: hidden;
+      cursor: pointer;
+      transition: border-color .12s;
+    }
+    .ccard:hover { border-color: var(--border-2); }
+    .ccard.on { border: 1.5px solid var(--text); }
+    .ccard-head {
+      padding: 7px 11px;
+      background: var(--surface);
+      border-bottom: 0.5px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .ccard-head strong { font-size: 12px; font-weight: 500; }
+    .ccard-sub {
+      font-size: 10px;
+      color: var(--text-3);
+      max-width: 130px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .ccard-body {
+      background: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 10px;
+    }
+
+    /* Footer */
+    .footer {
+      text-align: center;
+      padding: 8px;
+      font-size: 11px;
+      color: var(--text-3);
+      border-top: 0.5px solid var(--border);
+      background: var(--surface);
+    }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useCallback } = React;
+
+/* ── Data ──────────────────────────────────────────────────────── */
+const PRESETS = {
+  '1房': [
+    { name: '客廳',  min: 12, max: 25 },
+    { name: '臥室',  min: 10, max: 18 },
+    { name: '廚房',  min:  6, max: 12 },
+    { name: '衛浴',  min:  4, max:  8 },
+  ],
+  '2房': [
+    { name: '客廳',  min: 15, max: 30 },
+    { name: '主臥',  min: 12, max: 20 },
+    { name: '次臥',  min:  8, max: 15 },
+    { name: '廚房',  min:  6, max: 12 },
+    { name: '衛浴',  min:  4, max:  8 },
+  ],
+  '3房': [
+    { name: '客廳',  min: 18, max: 35 },
+    { name: '主臥',  min: 12, max: 22 },
+    { name: '次臥1', min:  8, max: 15 },
+    { name: '次臥2', min:  8, max: 15 },
+    { name: '廚房',  min:  7, max: 14 },
+    { name: '衛浴',  min:  4, max:  8 },
+    { name: '陽台',  min:  4, max: 10 },
+  ],
+};
+
+const ROOM_STYLE = {
+  '客廳':  { f: '#EEF4FF', s: '#93B4F5' },
+  '主臥':  { f: '#FFF0F5', s: '#F5A0B8' },
+  '臥室':  { f: '#FFF0F5', s: '#F5A0B8' },
+  '次臥':  { f: '#FFF8EE', s: '#F5C490' },
+  '次臥1': { f: '#FFF5EE', s: '#F5C490' },
+  '次臥2': { f: '#FFFAEE', s: '#F5DA90' },
+  '廚房':  { f: '#F0FFF6', s: '#80E0A8' },
+  '衛浴':  { f: '#F0F8FF', s: '#90C8F5' },
+  '陽台':  { f: '#F8F8EF', s: '#C8C890' },
+  default: { f: '#F5F5F5', s: '#BBBBBB' },
+};
+const rs = (n) => ROOM_STYLE[n] || ROOM_STYLE.default;
+const SIDES = ['top', 'right', 'bottom', 'left'];
+
+/* ── SVG Sub-components ────────────────────────────────────────── */
+function Door({ x, y, w, h, side }) {
+  const s = Math.min(w, h) * 0.38;
+  const pts = {
+    top:    { lx: x,   ly: y,   ax: x + s, ay: y,     sweep: 1 },
+    bottom: { lx: x,   ly: y+h, ax: x + s, ay: y+h,   sweep: 0 },
+    left:   { lx: x,   ly: y,   ax: x,     ay: y + s, sweep: 0 },
+    right:  { lx: x+w, ly: y,   ax: x+w,   ay: y + s, sweep: 1 },
+  };
+  const p = pts[side] || pts.top;
+  const ex = (side === 'top' || side === 'bottom') ? p.lx + s : p.ax;
+  const ey = (side === 'left' || side === 'right') ? p.ly + s : p.ay;
+  return (
+    <g opacity="0.65">
+      <line x1={p.lx} y1={p.ly} x2={ex} y2={ey} stroke="#666" strokeWidth="0.8" />
+      <path d={`M${p.lx},${p.ly} A${s},${s} 0 0,${p.sweep} ${p.ax},${p.ay}`}
+        fill="none" stroke="#666" strokeWidth="0.7" strokeDasharray="2,1.5" />
+    </g>
+  );
+}
+
+function Win({ x, y, w, h, side }) {
+  const len = Math.min(w, h) * 0.45;
+  let rx = x, ry = y, rw = w, rh = 3;
+  if (side === 'top')    { rx = x + (w-len)/2; ry = y;     rw = len; rh = 3; }
+  if (side === 'bottom') { rx = x + (w-len)/2; ry = y+h-3; rw = len; rh = 3; }
+  if (side === 'left')   { rx = x;     ry = y + (h-len)/2; rw = 3; rh = len; }
+  if (side === 'right')  { rx = x+w-3; ry = y + (h-len)/2; rw = 3; rh = len; }
+  const isH = side === 'top' || side === 'bottom';
+  return (
+    <g>
+      <rect x={rx} y={ry} width={rw} height={rh} fill="#B8E0F7" stroke="#6BBDE0" strokeWidth="0.7" />
+      {isH
+        ? <line x1={rx+rw/2} y1={ry}    x2={rx+rw/2} y2={ry+rh}  stroke="#6BBDE0" strokeWidth="0.5" />
+        : <line x1={rx}      y1={ry+rh/2} x2={rx+rw}  y2={ry+rh/2} stroke="#6BBDE0" strokeWidth="0.5" />}
+    </g>
+  );
+}
+
+function Dim({ x1, y1, x2, y2, label, dir }) {
+  const isH = dir === 'h';
+  const off = 16;
+  const mx = (x1+x2)/2, my = (y1+y2)/2;
+  const ox = isH ? 0 : -off, oy = isH ? -off : 0;
+  const ex1 = x1 + (isH ? 0 : -9), ey1 = y1 + (isH ? -9 : 0);
+  const ex2 = x2 + (isH ? 0 : -9), ey2 = y2 + (isH ? -9 : 0);
+  return (
+    <g>
+      <line x1={x1} y1={y1} x2={ex1} y2={ey1} stroke="#aaa" strokeWidth="0.5" strokeDasharray="2,2" />
+      <line x1={x2} y1={y2} x2={ex2} y2={ey2} stroke="#aaa" strokeWidth="0.5" strokeDasharray="2,2" />
+      <line x1={ex1} y1={ey1} x2={ex2} y2={ey2} stroke="#aaa" strokeWidth="0.8" />
+      <text x={mx+ox} y={my+oy} textAnchor="middle" dominantBaseline="middle"
+        fontSize="8" fill="#888" fontFamily="sans-serif"
+        transform={isH ? '' : `rotate(-90,${mx+ox},${my+oy})`}>{label}</text>
+    </g>
+  );
+}
+
+/* ── Plan SVG ──────────────────────────────────────────────────── */
+function PlanSVG({ id, rooms, siteW, siteH, dim, door, win, area, scale }) {
+  if (!rooms || !rooms.length) return null;
+  const pad = dim ? 50 : 22;
+  const svgW = siteW * scale + pad * 2;
+  const svgH = siteH * scale + pad * 2;
+  return (
+    <svg id={id} width={svgW} height={svgH} viewBox={`0 0 ${svgW} ${svgH}`}
+      xmlns="http://www.w3.org/2000/svg" style={{ display: 'block', background: 'white' }}>
+      <rect x={pad} y={pad} width={siteW*scale} height={siteH*scale}
+        fill="white" stroke="#444" strokeWidth="2" />
+      {dim && <>
+        <Dim x1={pad} y1={pad} x2={pad+siteW*scale} y2={pad} label={`${siteW}cm`} dir="h" />
+        <Dim x1={pad} y1={pad} x2={pad} y2={pad+siteH*scale} label={`${siteH}cm`} dir="v" />
+      </>}
+      {rooms.map((r, i) => {
+        const x = pad + r.x * scale;
+        const y = pad + r.y * scale;
+        const w = r.width * scale;
+        const h = r.height * scale;
+        const st = rs(r.name);
+        const cx = x + w/2, cy = y + h/2;
+        const fs = Math.min(13, Math.max(8, Math.min(w, h) / 5.5));
+        const sqm = ((r.width * r.height) / 10000).toFixed(1);
+        const ds = SIDES[i % 4], ws = SIDES[(i + 2) % 4];
+        return (
+          <g key={i}>
+            <rect x={x} y={y} width={w} height={h} fill={st.f} stroke={st.s} strokeWidth="1.2" />
+            {door && w > 30 && h > 30 && <Door x={x} y={y} w={w} h={h} side={ds} />}
+            {win  && w > 30 && h > 30 && <Win  x={x} y={y} w={w} h={h} side={ws} />}
+            {dim && (
+              <Dim x1={x} y1={y+h+20} x2={x+w} y2={y+h+20} label={`${r.width}cm`} dir="h" />
+            )}
+            <text x={cx} y={area ? cy-6 : cy} textAnchor="middle" dominantBaseline="middle"
+              fontSize={fs} fontWeight="500" fill="#333" fontFamily="sans-serif">{r.name}</text>
+            {area && (
+              <text x={cx} y={cy+7} textAnchor="middle" dominantBaseline="middle"
+                fontSize={Math.max(7, fs-2)} fill="#888" fontFamily="sans-serif">{sqm}㎡</text>
+            )}
+          </g>
+        );
+      })}
+      <text x={pad} y={svgH - 5} fontSize="8" fill="#bbb" fontFamily="sans-serif">
+        1:{Math.round(1/scale*10)*10} ／ 單位：公分
+      </text>
+    </svg>
+  );
+}
+
+/* ── Worker Proxy URL ──────────────────────────────────────────── */
+// 部署 Cloudflare Worker 後，將下方網址改成你的 Worker 網址
+// 例如：https://fp-proxy.chenghongsong7.workers.dev
+// ============================================================
+// ▼▼▼  部署前請修改這一行  ▼▼▼
+//
+// 將下方網址改成你的 Cloudflare Worker 實際網址
+// 格式：https://fp-proxy.chenghongsong7.workers.dev
+//
+// 如何找到？登入 dash.cloudflare.com →
+//   Workers & Pages → fp-proxy → 右側會顯示完整網址
+// ============================================================
+const WORKER_URL = 'https://fp-proxy.chenghongsong7.workers.dev';
+// ============================================================
+
+/* ── AI Call（透過 Worker Proxy，不需要 API Key）──────────────── */
+async function callAI(siteW, siteH, roomType, styleP, constr) {
+  const rooms = PRESETS[roomType] || PRESETS['2房'];
+  const cStr = rooms.map(r => {
+    const c = constr[r.name] || {};
+    return `- ${r.name}：面積 ${c.min || r.min}~${c.max || r.max} ㎡`;
+  }).join('\n');
+
+  const prompt = `你是建築空間配置專家。根據以下條件生成4個配置方案（每個方案要有不同的空間排列邏輯）。
+
+基地：寬${siteW}cm×深${siteH}cm，格局：${roomType}，風格：${styleP}
+面積限制（width×height÷10000 需符合範圍）：
+${cStr}
+
+規則：
+1. 所有房間在基地內（x≥0, y≥0, x+width≤${siteW}, y+height≤${siteH}）
+2. 房間之間不可重疊
+3. x/y/width/height 皆為整數（公分）
+4. 各方案的空間排列邏輯要明顯不同
+
+只回傳以下JSON格式，不含任何其他文字或 Markdown：
+{"plans":[{"label":"方案A","note":"配置說明（一句話）","rooms":[{"name":"客廳","x":0,"y":0,"width":500,"height":400},...]},...]}`;
+
+  const res = await fetch(WORKER_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 4000,
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  });
+
+  if (res.status === 429) throw new Error('請求過於頻繁，請稍後再試');
+  if (!res.ok) throw new Error(`Proxy 錯誤 ${res.status}，請確認 Worker 已正確部署`);
+  const data = await res.json();
+  const text = (data.content || []).map(c => c.text || '').join('');
+  return JSON.parse(text.replace(/```json|```/g, '').trim());
+}
+
+/* ── App ───────────────────────────────────────────────────────── */
+function App() {
+  const [siteW,   setSiteW]   = useState(1000);
+  const [siteH,   setSiteH]   = useState(800);
+  const [roomType,setRoomType]= useState('2房');
+  const [styleP,  setStyleP]  = useState('一般住宅');
+  const [constr,  setConstr]  = useState({});
+  const [showDim, setShowDim] = useState(true);
+  const [showDoor,setShowDoor]= useState(true);
+  const [showWin, setShowWin] = useState(true);
+  const [showArea,setShowArea]= useState(true);
+  const [loading, setLoading] = useState(false);
+  const [prog,    setProg]    = useState(0);
+  const [plans,   setPlans]   = useState(null);
+  const [sel,     setSel]     = useState(0);
+  const [tab,     setTab]     = useState('single');
+  const [err,     setErr]     = useState('');
+  const [exporting,setExporting] = useState('');
+
+  const curRooms = PRESETS[roomType] || PRESETS['2房'];
+  const selPlan  = plans?.[sel];
+  const totalA   = (siteW * siteH / 10000).toFixed(0);
+  const usedA    = selPlan
+    ? selPlan.rooms.reduce((s, r) => s + r.width * r.height / 10000, 0).toFixed(1)
+    : null;
+  const ratio = usedA ? Math.min(100, Math.round(usedA / totalA * 100)) : 0;
+
+  const scaleM = Math.min(520 / siteW, 420 / siteH, 0.56);
+  const scaleT = Math.min(180 / siteW, 140 / siteH, 0.21);
+
+  const setC = (name, key, val) =>
+    setConstr(c => ({ ...c, [name]: { ...(c[name] || {}), [key]: val === '' ? undefined : +val } }));
+
+  /* Generate */
+  const generate = useCallback(async () => {
+    setLoading(true); setErr(''); setPlans(null); setProg(5);
+    const t = setInterval(() => setProg(p => Math.min(p + 7, 88)), 700);
+    try {
+      const result = await callAI(siteW, siteH, roomType, styleP, constr);
+      clearInterval(t); setProg(100);
+      setTimeout(() => {
+        setPlans(result.plans); setSel(0); setTab('single');
+        setLoading(false); setProg(0);
+      }, 250);
+    } catch (e) {
+      clearInterval(t);
+      setErr(e.message);
+      setLoading(false); setProg(0);
+    }
+  }, [siteW, siteH, roomType, styleP, constr]);
+
+  /* Export SVG */
+  const exportSVG = () => {
+    const el = document.getElementById('main-svg'); if (!el) return;
+    const blob = new Blob([el.outerHTML], { type: 'image/svg+xml' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `平面圖-${roomType}-${selPlan?.label || 'A'}.svg`;
+    a.click();
+  };
+
+  /* Export PNG (high-res 3x) */
+  const exportPNG = async () => {
+    setExporting('png');
+    const el = document.getElementById('main-svg'); if (!el) { setExporting(''); return; }
+    const xml = new XMLSerializer().serializeToString(el);
+    const vb = el.viewBox.baseVal;
+    const sc = 3;
+    const canvas = document.createElement('canvas');
+    canvas.width = vb.width * sc; canvas.height = vb.height * sc;
+    const ctx = canvas.getContext('2d');
+    const img = new Image();
+    await new Promise((res, rej) => {
+      img.onload = () => { ctx.scale(sc, sc); ctx.drawImage(img, 0, 0); res(); };
+      img.onerror = rej;
+      img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(xml)));
+    });
+    const a = document.createElement('a');
+    a.href = canvas.toDataURL('image/png');
+    a.download = `平面圖-${roomType}-${selPlan?.label || 'A'}.png`;
+    a.click();
+    setExporting('');
+  };
+
+  /* Export PDF (Canvas → PDF stream) */
+  const exportPDF = async () => {
+    setExporting('pdf');
+    try {
+      const el = document.getElementById('main-svg'); if (!el) { setExporting(''); return; }
+      const xml = new XMLSerializer().serializeToString(el);
+      const vb = el.viewBox.baseVal;
+      const sc = 2;
+      const canvas = document.createElement('canvas');
+      canvas.width = vb.width * sc; canvas.height = vb.height * sc;
+      const ctx = canvas.getContext('2d');
+      const img = new Image();
+      await new Promise((res, rej) => {
+        img.onload = () => {
+          ctx.fillStyle = 'white'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.scale(sc, sc); ctx.drawImage(img, 0, 0); res();
+        };
+        img.onerror = rej;
+        img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(xml)));
+      });
+      const imgData = canvas.toDataURL('image/jpeg', 0.92);
+      const b64 = imgData.split(',')[1];
+      const raw = atob(b64);
+      const pw = 595, ph = Math.round(vb.height / vb.width * pw);
+      const imgLen = raw.length;
+
+      /* Minimal PDF-1.4 structure */
+      let offset = 0;
+      const xref = [];
+      const addObj = (content) => {
+        xref.push(offset);
+        const s = content + '\n';
+        offset += s.length;
+        return s;
+      };
+      let pdf = '';
+      const header = '%PDF-1.4\n%\xFF\xFF\xFF\xFF\n';
+      offset = header.length;
+      pdf += header;
+      pdf += addObj('1 0 obj\n<</Type/Catalog/Pages 2 0 R>>\nendobj');
+      pdf += addObj(`2 0 obj\n<</Type/Pages/Kids[3 0 R]/Count 1>>\nendobj`);
+      pdf += addObj(`3 0 obj\n<</Type/Page/Parent 2 0 R/MediaBox[0 0 ${pw} ${ph}]/Contents 4 0 R/Resources<</XObject<</Im1 5 0 R>>>>>>\nendobj`);
+      const stream = `q ${pw} 0 0 ${ph} 0 0 cm /Im1 Do Q`;
+      pdf += addObj(`4 0 obj\n<</Length ${stream.length}>>\nstream\n${stream}\nendstream\nendobj`);
+
+      const imgHeader = `5 0 obj\n<</Type/XObject/Subtype/Image/Width ${canvas.width}/Height ${canvas.height}/ColorSpace/DeviceRGB/BitsPerComponent 8/Filter/DCTDecode/Length ${imgLen}>>\nstream\n`;
+      xref.push(offset);
+      pdf += imgHeader;
+      offset += imgHeader.length + imgLen + '\nendstream\nendobj\n'.length;
+      const xrefOffset = offset;
+
+      const xrefSection = `xref\n0 6\n0000000000 65535 f \n` +
+        xref.map(o => String(o).padStart(10,'0') + ' 00000 n ').join('\n') + '\n';
+      const trailer = `trailer\n<</Size 6/Root 1 0 R>>\nstartxref\n${xrefOffset}\n%%EOF`;
+
+      /* Assemble as Uint8Array to embed binary JPEG */
+      const enc = new TextEncoder();
+      const part1 = enc.encode(pdf);
+      const part2 = new Uint8Array(raw.split('').map(c => c.charCodeAt(0)));
+      const part3 = enc.encode('\nendstream\nendobj\n' + xrefSection + trailer);
+      const blob = new Blob([part1, part2, part3], { type: 'application/pdf' });
+
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `平面圖-${roomType}-${selPlan?.label || 'A'}.pdf`;
+      a.click();
+    } catch (e) {
+      setErr('PDF 匯出失敗，建議改用 PNG 格式。（' + e.message + '）');
+    }
+    setExporting('');
+  };
+
+  /* ── Render ── */
+  return (
+    <>
+      <header className="header">
+        <div className="header-title">
+          <h1>AI 輔助建築平面圖生成系統</h1>
+          <span>v1.0</span>
+        </div>
+        <div className="header-meta">國立雲林科技大學 營建工程系 · 宋成弘 · 劉述舜教授指導</div>
+      </header>
+
+      <div className="app">
+        {/* ── Sidebar ── */}
+        <div className="sidebar">
+
+          {/* 基地設定 */}
+          <div className="sb-sec">
+            <div className="sec-label">基地設定</div>
+            <div className="g2">
+              <div className="field">
+                <label>寬度（公分）</label>
+                <input type="number" value={siteW} min={400} max={3000} step={50}
+                  onChange={e => setSiteW(+e.target.value)} />
+              </div>
+              <div className="field">
+                <label>深度（公分）</label>
+                <input type="number" value={siteH} min={400} max={3000} step={50}
+                  onChange={e => setSiteH(+e.target.value)} />
+              </div>
+            </div>
+            <div className="stats">
+              <div className="stat">
+                <div className="stat-v">{totalA}</div>
+                <div className="stat-l">基地 ㎡</div>
+              </div>
+              <div className="stat">
+                <div className="stat-v">{usedA || '—'}</div>
+                <div className="stat-l">使用 ㎡</div>
+              </div>
+              <div className="stat">
+                <div className="stat-v">{usedA ? ratio + '%' : '—'}</div>
+                <div className="stat-l">使用率</div>
+              </div>
+            </div>
+            {usedA && <div className="pbar"><div className="pfill" style={{ width: ratio + '%' }} /></div>}
+          </div>
+
+          {/* 格局設定 */}
+          <div className="sb-sec">
+            <div className="sec-label">格局設定</div>
+            <div className="g2">
+              <div className="field">
+                <label>房型</label>
+                <select value={roomType} onChange={e => { setRoomType(e.target.value); setConstr({}); }}>
+                  <option>1房</option>
+                  <option>2房</option>
+                  <option>3房</option>
+                </select>
+              </div>
+              <div className="field">
+                <label>風格</label>
+                <select value={styleP} onChange={e => setStyleP(e.target.value)}>
+                  <option>一般住宅</option>
+                  <option>開放式格局</option>
+                  <option>日式風格</option>
+                  <option>北歐風格</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* 面積限制 */}
+          <div className="sb-sec">
+            <div className="sec-label">空間面積限制（㎡）</div>
+            <div className="cg">
+              <div /><div className="cg-head">最小</div><div className="cg-head">最大</div>
+              {curRooms.map(r => {
+                const st = rs(r.name);
+                const c = constr[r.name] || {};
+                return [
+                  <div key={r.name + 'l'} style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                    <div className="cg-dot" style={{ background: st.s }} />
+                    <span className="cg-name">{r.name}</span>
+                  </div>,
+                  <input key={r.name + 'n'} type="number" className="cg-inp"
+                    placeholder={r.min} value={c.min || ''} min={1} max={99}
+                    onChange={e => setC(r.name, 'min', e.target.value)} />,
+                  <input key={r.name + 'x'} type="number" className="cg-inp"
+                    placeholder={r.max} value={c.max || ''} min={1} max={99}
+                    onChange={e => setC(r.name, 'max', e.target.value)} />,
+                ];
+              })}
+            </div>
+          </div>
+
+          {/* 顯示設定 */}
+          <div className="sb-sec">
+            <div className="sec-label">顯示設定</div>
+            {[
+              ['dim',  showDim,  setShowDim,  '尺寸標注線'],
+              ['door', showDoor, setShowDoor, '門（弧線示意）'],
+              ['win',  showWin,  setShowWin,  '窗（藍色標示）'],
+              ['area', showArea, setShowArea, '面積數字'],
+            ].map(([k, v, fn, lbl]) => (
+              <div className="toggle" key={k}>
+                <span>{lbl}</span>
+                <input type="checkbox" checked={v} onChange={e => fn(e.target.checked)} />
+              </div>
+            ))}
+          </div>
+
+          {/* 生成按鈕 */}
+          <div className="sb-sec">
+            <button className="btn-main" onClick={generate} disabled={loading}>
+              {loading ? `AI 分析中 ${prog}%` : '✦ AI 生成平面圖（4方案）'}
+            </button>
+            {loading && (
+              <div className="pbar" style={{ marginTop: '8px' }}>
+                <div className="pfill" style={{ width: prog + '%' }} />
+              </div>
+            )}
+          </div>
+
+          {/* 匯出 */}
+          {plans && (
+            <div className="sb-sec">
+              <div className="sec-label" style={{ marginBottom: '8px' }}>圖面匯出</div>
+              <div className="export-row">
+                <button className="btn-out" onClick={exportSVG}>↓ SVG</button>
+                <button className="btn-out" onClick={exportPNG} disabled={!!exporting}>
+                  {exporting === 'png' ? '處理中…' : '↓ PNG'}
+                </button>
+                <button className="btn-out" onClick={exportPDF} disabled={!!exporting}>
+                  {exporting === 'pdf' ? '處理中…' : '↓ PDF'}
+                </button>
+              </div>
+              {selPlan?.note && <div className="note">AI：{selPlan.note}</div>}
+            </div>
+          )}
+        </div>
+
+        {/* ── Canvas ── */}
+        <div className="canvas-wrap">
+          <div className="topbar">
+            <div className="tab-group">
+              {plans && ['single', 'compare'].map(t => (
+                <div key={t} className={'tab' + (tab === t ? ' on' : '')} onClick={() => setTab(t)}>
+                  {t === 'single' ? '單圖檢視' : '4方案比較'}
+                </div>
+              ))}
+              {!plans && (
+                <span style={{ fontSize: '13px', color: 'var(--text-2)' }}>平面圖預覽</span>
+              )}
+            </div>
+            {plans && tab === 'single' && (
+              <div className="plan-tabs">
+                {plans.map((p, i) => (
+                  <div key={i} className={'ptab' + (sel === i ? ' on' : '')} onClick={() => setSel(i)}>
+                    {p.label}
+                  </div>
+                ))}
+              </div>
+            )}
+            {plans && tab === 'compare' && (
+              <span style={{ fontSize: '11px', color: 'var(--text-3)' }}>點擊方案可放大檢視</span>
+            )}
+          </div>
+
+          <div className="svg-area">
+            {!loading && !plans && !err && (
+              <div className="empty-state">
+                <div style={{ fontSize: '30px', marginBottom: '14px', opacity: .18 }}>⊹</div>
+                設定基地尺寸與格局後<br />
+                點擊「AI 生成平面圖」開始<br />
+                <span style={{ fontSize: '12px', opacity: .55 }}>將同時生成 4 個不同配置方案</span>
+              </div>
+            )}
+            {loading && (
+              <div className="empty-state">
+                <div className="spinner" />
+                Claude AI 正在規劃 4 套空間配置方案…<br />
+                <span style={{ fontSize: '12px', opacity: .55 }}>（約 10–20 秒）</span>
+              </div>
+            )}
+            {err && <div className="err">{err}</div>}
+
+            {plans && !loading && tab === 'single' && selPlan && (
+              <PlanSVG id="main-svg"
+                rooms={selPlan.rooms} siteW={siteW} siteH={siteH}
+                dim={showDim} door={showDoor} win={showWin} area={showArea}
+                scale={scaleM} />
+            )}
+
+            {plans && !loading && tab === 'compare' && (
+              <div className="compare-grid">
+                {plans.map((p, i) => (
+                  <div key={i} className={'ccard' + (sel === i ? ' on' : '')}
+                    onClick={() => { setSel(i); setTab('single'); }}>
+                    <div className="ccard-head">
+                      <strong>{p.label}</strong>
+                      <span className="ccard-sub">{p.note}</span>
+                    </div>
+                    <div className="ccard-body">
+                      <PlanSVG rooms={p.rooms} siteW={siteW} siteH={siteH}
+                        dim={false} door={showDoor} win={false} area={showArea}
+                        scale={scaleT} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <footer className="footer">
+        AI 輔助建築平面圖生成系統 · 國立雲林科技大學 營建工程系 · 114 學年度大學部專題
+      </footer>
+    </>
+  );
+}
+
+ReactDOM.render(<App />, document.getElementById('root'));
+</script>
+</body>
+</html>
